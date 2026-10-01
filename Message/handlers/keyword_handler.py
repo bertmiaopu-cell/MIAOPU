@@ -1,5 +1,18 @@
 """
 关键词检测处理器 - 检测转人工关键词并触发转人工流程
+
+⚠️ 已停用（2026-10-02）
+--------------------------------------------------------------------------
+本处理器在处理器链里优先级最高：只要买家消息里命中任意一个关键词，就会
+直接转人工并**跳过后面的 AI 处理器**，导致"客户问的是 AI 能答的问题，却
+被关键词拦掉直接甩给人工"。
+
+现在改为：**不再做关键词拦截，是否需要人工完全交给 AI 判断**。
+做法是把关键词集合固定成一个永远不可能出现在买家消息里的哨兵值，
+`can_handle()` 因此恒为 False，本处理器实际上变成空操作。
+
+- 数据库里的关键词表和「关键词管理」界面都保留着，不影响原有数据；
+- 想恢复旧行为，把下面的 `KEYWORD_INTERCEPT_ENABLED` 改回 True 即可。
 """
 import asyncio
 from datetime import datetime, time
@@ -10,6 +23,13 @@ from database.db_manager import db_manager
 from utils.logger_loguru import get_logger
 from bridge.sender import get_sender
 
+# 关键词拦截总开关。False = 转人工完全由 AI 判断（当前行为）。
+KEYWORD_INTERCEPT_ENABLED = False
+
+# 哨兵：含 NUL 字符，任何正常的买家消息都不可能包含它。
+_NEVER_MATCH_KEYWORD = "\x00__keyword_intercept_disabled__\x00"
+
+
 class KeywordDetectionHandler(BaseHandler):
     """关键词检测处理器 - 检测转人工关键词并触发转人工流程"""
 
@@ -19,11 +39,21 @@ class KeywordDetectionHandler(BaseHandler):
         self.business_hours = business_hours or {"start": "08:00", "end": "23:00"}
         self.keywords = self._load_keywords()
 
-        # 记录加载的关键词数量
-        self.logger.info(f"关键词检测处理器初始化完成，加载了 {len(self.keywords)} 个关键词")
+        if KEYWORD_INTERCEPT_ENABLED:
+            self.logger.info(f"关键词检测处理器初始化完成，加载了 {len(self.keywords)} 个关键词")
+        else:
+            self.logger.info(
+                "关键词拦截已停用：转人工完全交给 AI 判断（关键词表保留，但不再参与匹配）"
+            )
 
     def _load_keywords(self):
-        """从数据库加载关键词"""
+        """加载关键词。
+
+        停用状态下直接返回哨兵集合，连数据库都不查，杜绝任何形式的误命中。
+        """
+        if not KEYWORD_INTERCEPT_ENABLED:
+            return {_NEVER_MATCH_KEYWORD}
+
         try:
             keywords_data = db_manager.get_all_keywords()
             keywords = {item['keyword'].lower() for item in keywords_data if item.get('keyword')}
@@ -47,6 +77,10 @@ class KeywordDetectionHandler(BaseHandler):
 
     def can_handle(self, context: Context) -> bool:
         """检查消息是否包含关键词"""
+        # 停用状态下永远不接管，消息全部交给 AI 处理器
+        if not KEYWORD_INTERCEPT_ENABLED:
+            return False
+
         # 只处理文本类型的消息
         if not self._within_business_hours():
             return False

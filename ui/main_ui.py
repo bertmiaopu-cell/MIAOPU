@@ -37,7 +37,11 @@ class MainWindow(FluentWindow):
         # 延迟加载的视图
         self.knowledge_view = None
         self.monitor_view = None
-        self.keyword_manager_view = None
+        # 关键词拦截已停用（见 Message/handlers/keyword_handler.py），
+        # 「关键词管理」入口一并隐藏。需要恢复时：把下面这行取消注释，
+        # 并在 lazy_load_views / initNavigation 里恢复对应两处即可。
+        # self.keyword_manager_view = None
+        self.notify_view = None
         self.user_manager_view = None
         self.log_view = None
         self.settingInterface = None
@@ -58,8 +62,12 @@ class MainWindow(FluentWindow):
         from ui.auto_reply_ui import AutoReplyUI
         self.logger.info(f"  import AutoReplyUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
-        from ui.keyword_ui import KeywordManagerWidget
-        self.logger.info(f"  import KeywordManagerWidget: {time.perf_counter()-t:.2f}s")
+        # 关键词拦截已停用，「关键词管理」界面不再加载（原来在这里 import
+        # KeywordManagerWidget）。需要恢复时把下面两行取消注释即可。
+        # from ui.keyword_ui import KeywordManagerWidget
+        # self.logger.info(f"  import KeywordManagerWidget: {time.perf_counter()-t:.2f}s")
+        from ui.notify_ui import NotifyUI
+        self.logger.info(f"  import NotifyUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
         from ui.user_ui import UserManagerWidget
         self.logger.info(f"  import UserManagerWidget: {time.perf_counter()-t:.2f}s")
@@ -76,8 +84,11 @@ class MainWindow(FluentWindow):
         self.monitor_view = AutoReplyUI(self)
         self.logger.info(f"  AutoReplyUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
-        self.keyword_manager_view = KeywordManagerWidget(self)
-        self.logger.info(f"  KeywordManagerWidget: {time.perf_counter()-t:.2f}s")
+        # self.keyword_manager_view = KeywordManagerWidget(self)   # 关键词拦截已停用
+        # self.logger.info(f"  KeywordManagerWidget: {time.perf_counter()-t:.2f}s")
+        t = time.perf_counter()
+        self.notify_view = NotifyUI(self)
+        self.logger.info(f"  NotifyUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
         self.user_manager_view = UserManagerWidget(self)
         self.logger.info(f"  UserManagerWidget: {time.perf_counter()-t:.2f}s")
@@ -100,7 +111,9 @@ class MainWindow(FluentWindow):
         self.navigationInterface.setExpandWidth(200)
         self.navigationInterface.setMinimumWidth(200)
         self.addSubInterface(self.monitor_view, FIF.CHAT, '自动回复')
-        self.addSubInterface(self.keyword_manager_view, FIF.EDIT, '关键词管理')
+        # 关键词拦截已停用，入口隐藏；转人工完全交给 AI 判断
+        # self.addSubInterface(self.keyword_manager_view, FIF.EDIT, '关键词管理')
+        self.addSubInterface(self.notify_view, FIF.SEND, '转人工通知')
         self.addSubInterface(self.user_manager_view, FIF.PEOPLE, '账号管理')
         self.addSubInterface(self.knowledge_view, FIF.DOCUMENT, '知识库')
         # 添加二维码按钮

@@ -85,6 +85,22 @@ class PromptConfig(BaseModel):
     instructions: list[str] = Field(default_factory=list, description="指令")
 
 
+class NotifyConfig(BaseModel):
+    """转人工邮件通知配置模型
+
+    买家咨询被转接给人工时，通过 QQ 邮箱把通知发到商家的手机邮箱。
+    auth_code 是 QQ 邮箱的 SMTP 授权码（不是登录密码），落盘时用 DPAPI 加密。
+    """
+    enabled: bool = Field(default=False, description="是否启用转人工邮件通知")
+    smtp_host: str = Field(default="smtp.qq.com", description="SMTP 服务器")
+    smtp_port: int = Field(default=465, description="SMTP 端口（465=SSL，587=STARTTLS）")
+    sender_email: str = Field(default="", description="发件 QQ 邮箱")
+    auth_code: str = Field(default="", description="QQ 邮箱 SMTP 授权码")
+    recipient_email: str = Field(default="", description="接收通知的邮箱（可填手机邮箱）")
+    include_customer_message: bool = Field(default=True, description="邮件里是否附上客户原话")
+    timeout: int = Field(default=20, description="发送超时（秒）")
+
+
 class ConfigModel(BaseModel):
     """配置模型"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -99,6 +115,10 @@ class ConfigModel(BaseModel):
     prompt: PromptConfig = Field(
         default_factory=PromptConfig,
         description="提示词配置"
+    )
+    notify: NotifyConfig = Field(
+        default_factory=NotifyConfig,
+        description="转人工邮件通知配置"
     )
     db_path: str = Field(default="./temp/channel_shop.db", description="数据库路径")
 
@@ -129,6 +149,17 @@ config_base = {
             "4. 如果知识库中有相关信息，请根据知识库内容回答用户问题",
             "5. 如果知识库中没有相关信息，再根据已有知识回答或建议用户联系人工客服"
         ]
+    },
+    # 转人工邮件通知（默认关闭，在「转人工通知」页面里配置）
+    "notify": {
+        "enabled": False,
+        "smtp_host": "smtp.qq.com",
+        "smtp_port": 465,
+        "sender_email": "",
+        "auth_code": "",
+        "recipient_email": "",
+        "include_customer_message": True,
+        "timeout": 20,
     }
 }
 
@@ -445,11 +476,15 @@ class Config:
 
     @staticmethod
     def _protect_secrets(config_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Copy config and protect persisted API keys without changing memory."""
+        """Copy config and protect persisted secrets without changing memory."""
         result = copy.deepcopy(config_data)
         llm = result.get("llm")
         if isinstance(llm, dict) and "api_key" in llm:
             llm["api_key"] = protect_secret(llm.get("api_key"))
+        # 转人工通知的 QQ 邮箱授权码同样是凭据，一并加密落盘
+        notify = result.get("notify")
+        if isinstance(notify, dict) and "auth_code" in notify:
+            notify["auth_code"] = protect_secret(notify.get("auth_code"))
         return result
 
     @staticmethod
@@ -459,13 +494,20 @@ class Config:
         llm = result.get("llm")
         if isinstance(llm, dict) and "api_key" in llm:
             llm["api_key"] = unprotect_secret(llm.get("api_key"))
+        notify = result.get("notify")
+        if isinstance(notify, dict) and "auth_code" in notify:
+            notify["auth_code"] = unprotect_secret(notify.get("auth_code"))
         return result
 
     @staticmethod
     def _has_plaintext_secrets(config_data: Dict[str, Any]) -> bool:
         llm = config_data.get("llm") if isinstance(config_data, dict) else None
         api_key = llm.get("api_key") if isinstance(llm, dict) else None
-        return bool(api_key) and not str(api_key).startswith("dpapi:v1:")
+        if bool(api_key) and not str(api_key).startswith("dpapi:v1:"):
+            return True
+        notify = config_data.get("notify") if isinstance(config_data, dict) else None
+        auth_code = notify.get("auth_code") if isinstance(notify, dict) else None
+        return bool(auth_code) and not str(auth_code).startswith("dpapi:v1:")
 
     @contextmanager
     def atomic_update(self):

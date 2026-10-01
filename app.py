@@ -40,6 +40,17 @@ from utils.logger_loguru import get_logger as _get_logger
 from core.di_container import configure_standard_services
 configure_standard_services(_app_config)
 
+# 5. 转人工邮件通知：自检配置并在启动日志里说明状态。
+#    通知本身是事件驱动的（AI 调用 transfer_conversation 时由 Agent 循环触发），
+#    这里只做一次启动自检，配置有问题能在日志第一屏就看到。
+try:
+    from service.transfer_notify import describe_status as _notify_status
+    _get_logger("App").info(_notify_status())
+except Exception as _e:  # pragma: no cover - 通知模块异常不能挡住启动
+    _get_logger("App").warning(
+        f"转人工通知模块初始化失败: error_type={type(_e).__name__}"
+    )
+
 # ============================================================================
 
 import time

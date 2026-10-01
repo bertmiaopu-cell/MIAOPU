@@ -283,7 +283,7 @@ class CustomerAgent(Bot):
 
             # 执行 Agent 循环
             final_content = await self._run_agent_loop(
-                messages, dependencies, session_id=session_id
+                messages, dependencies, session_id=session_id, query=query
             )
 
             # 保存最终回复到历史（DB 写入放工作线程，避免阻塞事件循环）
@@ -307,11 +307,14 @@ class CustomerAgent(Bot):
         messages: List[Dict[str, Any]],
         dependencies: Dict[str, Any],
         session_id: Optional[str] = None,
+        query: str = "",
     ) -> str:
         """
         Agent 循环核心
 
         调用 LLM → 检查 tool_calls → 并行执行工具 → 回传结果 → 循环
+
+        query 仅用于转人工通知（把买家原话一起发给商家），不影响 LLM 输入。
         """
         loop_count = 0
 
@@ -386,6 +389,17 @@ class CustomerAgent(Bot):
                 response.tool_calls, dependencies
             )
 
+            # 5.5 转人工邮件通知：AI 请求人工接管时，把"为什么转"发到商家手机邮箱。
+            # 放在工具执行之后，此时才拿得到转接是否真的成功。
+            await self._notify_if_transferred(
+                response.tool_calls,
+                tool_results,
+                assistant_msg.get("content", ""),
+                query=query,
+                dependencies=dependencies,
+                session_id=session_id or "",
+            )
+
             # 6. 将结果追加到消息列表
             for result in tool_results:
                 messages.append(result.to_dict())
@@ -402,6 +416,55 @@ class CustomerAgent(Bot):
 
         # 兜底
         return messages[-1].get("content", "")
+
+    async def _notify_if_transferred(
+        self,
+        tool_calls: List[Any],
+        tool_results: List[Any],
+        reason: str,
+        *,
+        query: str,
+        dependencies: Dict[str, Any],
+        session_id: str,
+    ) -> None:
+        """AI 调用 transfer_conversation 且转接成功时，发邮件通知商家。
+
+        * reason  = AI 发起转接时同时说给买家的那句话，也就是"请求人工接管的原因"
+        * query   = 买家这一轮的原话
+        通知失败绝不能影响给买家的回复，所以这里吞掉所有异常，只记日志。
+        """
+        try:
+            names = []
+            for tc in tool_calls or []:
+                fn = getattr(tc, "function", None)
+                names.append(getattr(fn, "name", "") or "")
+            if "transfer_conversation" not in names:
+                return
+
+            succeeded = any(
+                "转接成功" in str(getattr(r, "content", "") or "")
+                for r in (tool_results or [])
+            )
+            if not succeeded:
+                logger.info("转人工未成功，跳过邮件通知")
+                return
+
+            from service.transfer_notify import notify_transfer
+
+            await asyncio.to_thread(
+                notify_transfer,
+                reason=reason or "",
+                customer_message=query or "",
+                shop_name=str(dependencies.get("shop_name") or ""),
+                shop_id=dependencies.get("shop_id"),
+                user_id=dependencies.get("user_id"),
+                session_id=session_id or "",
+                trigger="AI 判断需要人工接管",
+            )
+        except Exception as e:
+            logger.warning(
+                f"转人工通知发送失败: error_type={type(e).__name__}"
+            )
 
     async def _chat_with_vision_fallback(
         self,
