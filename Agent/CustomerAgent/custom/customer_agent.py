@@ -291,7 +291,8 @@ class CustomerAgent(Bot):
 
             # 执行 Agent 循环
             final_content = await self._run_agent_loop(
-                messages, dependencies, session_id=session_id, query=query
+                messages, dependencies, session_id=session_id, query=query,
+                mask_map=_mask_map,
             )
 
             # 把占位符换回真实信息，再存历史、再发给客户
@@ -319,6 +320,7 @@ class CustomerAgent(Bot):
         dependencies: Dict[str, Any],
         session_id: Optional[str] = None,
         query: str = "",
+        mask_map: Optional[Dict[str, str]] = None,
     ) -> str:
         """
         Agent 循环核心
@@ -326,6 +328,11 @@ class CustomerAgent(Bot):
         调用 LLM → 检查 tool_calls → 并行执行工具 → 回传结果 → 循环
 
         query 仅用于转人工通知（把买家原话一起发给商家），不影响 LLM 输入。
+
+        mask_map 是这一轮对话脱敏的占位符映射表。注意它**只用于写库**：
+        发给 LLM 的 messages 必须保持脱敏状态，而存进数据库的历史必须是
+        还原后的真实内容 —— 否则数据库里会永久留下 ADDR1 这类占位符，
+        而且下一轮引用到它时映射表已经失效，客户会看到字面的 "ADDR1"。
         """
         loop_count = 0
 
@@ -372,12 +379,16 @@ class CustomerAgent(Bot):
             }
             messages.append(assistant_msg)
             if session_id and self._session_manager:
+                # 写库用还原后的文本；messages 里保持脱敏版（不泄露给 LLM）
                 await asyncio.to_thread(
                     self._session_manager.add_message,
                     session_id=session_id,
                     role="assistant",
                     content=json.dumps(
-                        {"content": assistant_msg["content"], "tool_calls": assistant_msg["tool_calls"]},
+                        {
+                            "content": restore_text(assistant_msg["content"], mask_map),
+                            "tool_calls": assistant_msg["tool_calls"],
+                        },
                         ensure_ascii=False,
                     ),
                 )
@@ -415,11 +426,15 @@ class CustomerAgent(Bot):
             for result in tool_results:
                 messages.append(result.to_dict())
                 if session_id and self._session_manager:
+                    # 同样：落库前还原（工具参数里可能带上占位符）
+                    content = result.content
+                    if isinstance(content, str):
+                        content = restore_text(content, mask_map)
                     await asyncio.to_thread(
                         self._session_manager.add_message,
                         session_id=session_id,
                         role="tool",
-                        content=result.content,
+                        content=content,
                         tool_call_id=result.tool_call_id,
                     )
 

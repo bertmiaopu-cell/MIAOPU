@@ -181,6 +181,85 @@ def test_reply_delay_range_is_sane():
     print("  [OK] 1~10 秒随机延迟取值范围正确")
 
 
+# ==========================================================================
+# 五、回归：脱敏不能污染数据库
+#
+# 曾经的 bug：_run_agent_loop 会把「带工具调用的中间 assistant 消息」写进数据库，
+# 而那条消息是脱敏后的，于是库里永久留下 ADDR1；下一轮引用到它时映射表已失效，
+# 客户就会看到字面的 "ADDR1"。
+# ==========================================================================
+def test_agent_loop_saves_restored_content_to_db():
+    import asyncio
+    from types import SimpleNamespace
+    from Agent.CustomerAgent.custom.customer_agent import CustomerAgent
+
+    REAL = "浙江省杭州市余杭区五常街道文一西路969号"
+    MASKED = "我地址是ADDR1"
+    MAPPING = {"ADDR1": REAL}
+
+    class _Agent:
+        """只搭 _run_agent_loop 需要的这几个部件。"""
+
+        def __init__(self):
+            self._config = SimpleNamespace(max_loops=4)
+            self.saved = []
+            self._session_manager = SimpleNamespace(add_message=self._save)
+            self._tool_executor = SimpleNamespace(execute_parallel=self._exec)
+            self._responses = [
+                SimpleNamespace(
+                    content="好的，寄到 ADDR1 是吧",
+                    has_tool_calls=True,
+                    tool_calls=[SimpleNamespace(
+                        id="call_1",
+                        function=SimpleNamespace(name="search_customer_service_knowledge",
+                                                 arguments='{"query":"运费"}'),
+                    )],
+                ),
+                SimpleNamespace(content="已经登记好了", has_tool_calls=False, tool_calls=None),
+            ]
+            self.seen_by_llm = []
+
+        def _save(self, **kw):
+            self.saved.append(kw)
+            return True
+
+        async def _exec(self, tool_calls, dependencies):
+            return [SimpleNamespace(
+                to_dict=lambda: {"role": "tool", "tool_call_id": "call_1",
+                                 "content": "运费由买家承担，寄到 ADDR1 需到付"},
+                content="运费由买家承担，寄到 ADDR1 需到付",
+                tool_call_id="call_1",
+            )]
+
+        async def _chat_with_vision_fallback(self, messages, tool_choice=None):
+            self.seen_by_llm.append([m.get("content") for m in messages])
+            return self._responses.pop(0)
+
+        async def _notify_if_transferred(self, *a, **k):
+            return None
+
+    agent = _Agent()
+    out = asyncio.run(CustomerAgent._run_agent_loop(
+        agent,
+        [{"role": "user", "content": MASKED}],
+        {},
+        session_id="s1",
+        query=MASKED,
+        mask_map=MAPPING,
+    ))
+
+    # 1) 发给 LLM 的上下文里必须是脱敏的，绝不能出现真实地址
+    for snapshot in agent.seen_by_llm:
+        for c in snapshot:
+            assert REAL not in str(c), f"真实地址泄露给了 LLM: {c}"
+
+    # 2) 存进数据库的必须已还原，不能留下占位符
+    blob = "\n".join(str(m.get("content")) for m in agent.saved)
+    assert "ADDR1" not in blob, f"数据库里残留占位符：\n{blob}"
+    assert REAL in blob, f"数据库里没有还原出真实地址：\n{blob}"
+    print("  [OK] 中间消息落库前还原，LLM 上下文保持脱敏（回归）")
+
+
 def main():
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
