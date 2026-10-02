@@ -36,6 +36,7 @@ from bridge.reply import Reply, ReplyType
 from Agent.CustomerAgent.custom.session_manager import SessionManager
 from Agent.CustomerAgent.custom.tool_decorator import get_tools_for_llm
 from utils.logger_loguru import get_logger
+from utils.privacy_mask import mask_messages_with_config, restore_text
 
 # 导入重构后的模块
 from Agent.CustomerAgent.custom.agent_config import (
@@ -281,10 +282,20 @@ class CustomerAgent(Bot):
                 images=current_images,
             )
 
+            # 对话脱敏：发给云端大模型之前，把客户消息里的手机号、地址、订单号等
+            # 换成占位符（PHONE1 / ADDR1 …），原值只留在本次请求内存里。
+            # 开关在 config.json 的 privacy 段，界面上可改。
+            messages, _mask_map = mask_messages_with_config(messages)
+            if _mask_map:
+                logger.debug(f"对话脱敏生效: 替换 {len(_mask_map)} 处")
+
             # 执行 Agent 循环
             final_content = await self._run_agent_loop(
                 messages, dependencies, session_id=session_id, query=query
             )
+
+            # 把占位符换回真实信息，再存历史、再发给客户
+            final_content = restore_text(final_content, _mask_map)
 
             # 保存最终回复到历史（DB 写入放工作线程，避免阻塞事件循环）
             await asyncio.to_thread(

@@ -68,6 +68,34 @@ def main() -> int:
     from qfluentwidgets import FluentIcon as FIF
     print("   OK  FIF.SEND 可用，入口文案：转人工通知")
 
+    print("7) 实例化「隐私与节奏」界面")
+    from ui.privacy_ui import PrivacyUI
+    pv = PrivacyUI()
+    assert pv.objectName() == "隐私与节奏"
+    for attr in ["privacy_card", "rhythm_card", "test_input", "test_btn", "test_output"]:
+        assert hasattr(pv, attr), f"缺少 {attr}"
+    print("   OK  控件齐全")
+
+    print("8) 脱敏/延迟配置读写往返")
+    pv.privacy_card.mobile_switch.setChecked(False)
+    pv.rhythm_card.min_spin.setValue(2.5)
+    pv.rhythm_card.max_spin.setValue(8.5)
+    pv.privacy_card.save_to_config()
+    pv.rhythm_card.save_to_config()
+    assert card.save_to_config() is True
+    from config import config as _cfg
+    assert _cfg.get("privacy.mask_mobile") is False, _cfg.get("privacy.mask_mobile")
+    assert abs(float(_cfg.get("reply.delay_min")) - 2.5) < 0.01
+    assert abs(float(_cfg.get("reply.delay_max")) - 8.5) < 0.01
+    print("   OK  分类开关与延迟区间都已落盘")
+
+    print("9) 界面里的脱敏自测按钮能出结果")
+    pv.test_input.setText("我地址是浙江省杭州市余杭区五常街道文一西路969号，电话13800138000")
+    pv.onTest()
+    out = pv.test_output.text()
+    assert "PHONE1" in out and "ADDR1" in out, out
+    print("   OK  %s" % out.splitlines()[0][:60])
+
     print("\n✅ UI 冒烟测试全部通过")
     return 0
 

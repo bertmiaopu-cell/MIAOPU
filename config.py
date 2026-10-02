@@ -101,6 +101,30 @@ class NotifyConfig(BaseModel):
     timeout: int = Field(default=20, description="发送超时（秒）")
 
 
+class PrivacyConfig(BaseModel):
+    """对话脱敏配置模型
+
+    发给云端大模型之前，把客户消息里的手机号、地址、订单号等替换成占位符，
+    回复时再还原，降低「把他人信息传输给非平台认可第三方」的合规风险。
+    """
+    mask_enabled: bool = Field(default=True, description="是否启用对话脱敏")
+    mask_mobile: bool = Field(default=True, description="手机号")
+    mask_idcard: bool = Field(default=True, description="身份证号")
+    mask_landline: bool = Field(default=True, description="固定电话")
+    mask_long_number: bool = Field(default=True, description="订单号/银行卡等长数字")
+    mask_address: bool = Field(default=True, description="收货地址（启发式识别）")
+
+
+class ReplyConfig(BaseModel):
+    """回复节奏配置模型
+
+    给回复加一点随机延迟，避免「秒回」被平台判定为机器自动回复。
+    """
+    delay_enabled: bool = Field(default=True, description="是否启用拟人化随机延迟")
+    delay_min: float = Field(default=1.0, description="最短延迟（秒）")
+    delay_max: float = Field(default=10.0, description="最长延迟（秒）")
+
+
 class ConfigModel(BaseModel):
     """配置模型"""
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -119,6 +143,14 @@ class ConfigModel(BaseModel):
     notify: NotifyConfig = Field(
         default_factory=NotifyConfig,
         description="转人工邮件通知配置"
+    )
+    privacy: PrivacyConfig = Field(
+        default_factory=PrivacyConfig,
+        description="对话脱敏配置"
+    )
+    reply: ReplyConfig = Field(
+        default_factory=ReplyConfig,
+        description="回复节奏配置"
     )
     db_path: str = Field(default="./temp/channel_shop.db", description="数据库路径")
 
@@ -160,6 +192,21 @@ config_base = {
         "recipient_email": "",
         "include_customer_message": True,
         "timeout": 20,
+    },
+    # 对话脱敏（默认开启，在「隐私与节奏」页面里配置）
+    "privacy": {
+        "mask_enabled": True,
+        "mask_mobile": True,
+        "mask_idcard": True,
+        "mask_landline": True,
+        "mask_long_number": True,
+        "mask_address": True,
+    },
+    # 回复节奏：拟人化随机延迟（默认开启，1~10 秒）
+    "reply": {
+        "delay_enabled": True,
+        "delay_min": 1.0,
+        "delay_max": 10.0,
     }
 }
 

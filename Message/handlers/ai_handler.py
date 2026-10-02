@@ -4,6 +4,7 @@ AI回复处理器
 """
 
 import asyncio
+import random
 from typing import Dict, Any, Optional
 from bridge.context import Context, ContextType
 from .base import BaseHandler
@@ -105,8 +106,32 @@ class AIReplyHandler(BaseHandler):
             )
             return None
 
+    async def _human_delay(self) -> None:
+        """拟人化随机延迟。
+
+        平台判定「机器自动回复」最直接的特征就是秒回（尤其是 24 小时都是零点几秒
+        回一条）。这里在发送前随机等待一小段，让节奏更接近真人。
+        延迟秒数与开关都在 config.json 的 reply 段里，可在界面里改。
+        """
+        try:
+            from config import config
+            if not config.get('reply.delay_enabled', True):
+                return
+            lo = float(config.get('reply.delay_min', 1.0) or 0)
+            hi = float(config.get('reply.delay_max', 10.0) or 0)
+            if hi <= 0:
+                return
+            lo = max(0.0, min(lo, hi))
+            delay = random.uniform(lo, hi)
+            self.logger.info(f"拟人化延迟 {delay:.1f} 秒后发送回复")
+            await asyncio.sleep(delay)
+        except Exception as e:  # 延迟本身绝不能挡住回复
+            self.logger.warning(f"拟人化延迟失败（已忽略）: error_type={type(e).__name__}")
+
     async def _send_reply(self, context: Context, reply: str, metadata: Dict[str, Any]) -> bool:
         """发送回复"""
+        # 先把节奏放慢一点，再发
+        await self._human_delay()
         try:
             # 从metadata中提取必要信息
             shop_id = metadata.get('shop_id')

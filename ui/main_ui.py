@@ -42,6 +42,7 @@ class MainWindow(FluentWindow):
         # 并在 lazy_load_views / initNavigation 里恢复对应两处即可。
         # self.keyword_manager_view = None
         self.notify_view = None
+        self.privacy_view = None
         self.user_manager_view = None
         self.log_view = None
         self.settingInterface = None
@@ -69,6 +70,9 @@ class MainWindow(FluentWindow):
         from ui.notify_ui import NotifyUI
         self.logger.info(f"  import NotifyUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
+        from ui.privacy_ui import PrivacyUI
+        self.logger.info(f"  import PrivacyUI: {time.perf_counter()-t:.2f}s")
+        t = time.perf_counter()
         from ui.user_ui import UserManagerWidget
         self.logger.info(f"  import UserManagerWidget: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
@@ -89,6 +93,9 @@ class MainWindow(FluentWindow):
         t = time.perf_counter()
         self.notify_view = NotifyUI(self)
         self.logger.info(f"  NotifyUI: {time.perf_counter()-t:.2f}s")
+        t = time.perf_counter()
+        self.privacy_view = PrivacyUI(self)
+        self.logger.info(f"  PrivacyUI: {time.perf_counter()-t:.2f}s")
         t = time.perf_counter()
         self.user_manager_view = UserManagerWidget(self)
         self.logger.info(f"  UserManagerWidget: {time.perf_counter()-t:.2f}s")
@@ -114,6 +121,7 @@ class MainWindow(FluentWindow):
         # 关键词拦截已停用，入口隐藏；转人工完全交给 AI 判断
         # self.addSubInterface(self.keyword_manager_view, FIF.EDIT, '关键词管理')
         self.addSubInterface(self.notify_view, FIF.SEND, '转人工通知')
+        self.addSubInterface(self.privacy_view, FIF.VPN, '隐私与节奏')
         self.addSubInterface(self.user_manager_view, FIF.PEOPLE, '账号管理')
         self.addSubInterface(self.knowledge_view, FIF.DOCUMENT, '知识库')
         # 添加二维码按钮
